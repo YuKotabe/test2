@@ -1,0 +1,197 @@
+<!DOCTYPE html><html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>声で色を変える</title><style>
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    font-family: sans-serif;
+    transition: background-color 1.5s ease;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+  }
+
+  button {
+    font-size: 1.2rem;
+    padding: 15px 30px;
+    margin: 10px;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+  }
+
+  #status {
+    margin-top: 20px;
+    font-size: 1.2rem;
+  }
+
+  #result {
+    font-size: 1.5rem;
+    margin-top: 10px;
+  }
+</style></head><body><h1>🎨 声で世界の色を変えよう</h1><button id="startButton">🎤 マイクON</button>
+<button id="stopButton">⏹ マイクOFF</button>
+
+<div id="status">マイクはOFFです</div>
+<div id="result">好きな色や風景を話してください</div><script>
+
+const SpeechRecognition =
+  window.SpeechRecognition || window.webkitSpeechRecognition;
+
+let recognition;
+let listening = false;
+
+// 言葉 → 色
+const colorDictionary = {
+
+  "赤": "#ff3b30",
+  "青": "#2196f3",
+  "緑": "#4caf50",
+  "黄色": "#ffeb3b",
+  "紫": "#9c27b0",
+  "ピンク": "#ff80ab",
+  "オレンジ": "#ff9800",
+  "白": "#ffffff",
+  "黒": "#111111",
+
+  // イメージの色
+  "夜空": "#071a52",
+  "星空": "#101c45",
+  "夕焼け": "#ff7043",
+  "朝焼け": "#ff8a65",
+  "海": "#0288d1",
+  "森": "#2e7d32",
+  "桜": "#f8bbd0",
+  "雪": "#e3f2fd",
+  "炎": "#f4511e"
+
+};
+
+
+function changeColor(text) {
+
+  // 認識した言葉に含まれる単語を探す
+  for (const word in colorDictionary) {
+
+    if (text.includes(word)) {
+
+      const color = colorDictionary[word];
+
+      document.body.style.backgroundColor = color;
+
+      document.getElementById("result").textContent =
+        "🎨 「" + text + "」 → 色を変えました";
+
+      return;
+    }
+  }
+
+  document.getElementById("result").textContent =
+    "🤔 「" + text + "」を理解できませんでした";
+
+}
+
+
+function startListening() {
+
+  if (!SpeechRecognition) {
+    document.getElementById("status").textContent =
+      "このブラウザは音声認識に対応していません";
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+
+  recognition.lang = "ja-JP";
+
+  // 連続認識
+  recognition.continuous = true;
+
+  recognition.interimResults = false;
+
+  recognition.onstart = function() {
+    document.getElementById("status").textContent =
+      "🟢 聞いています…";
+  };
+
+
+  recognition.onresult = function(event) {
+
+    // 新しく認識された言葉だけ処理
+    for (let i = event.resultIndex;
+         i < event.results.length;
+         i++) {
+
+      if (event.results[i].isFinal) {
+
+        const text =
+          event.results[i][0].transcript.replace(/\s/g, "");
+
+        console.log("認識:", text);
+
+        changeColor(text);
+      }
+    }
+  };
+
+
+  // 認識が終了したら自動的に再開
+  recognition.onend = function() {
+
+    if (listening) {
+      console.log("音声認識を再開します");
+
+      setTimeout(() => {
+        recognition.start();
+      }, 300);
+    }
+  };
+
+
+  recognition.onerror = function(event) {
+
+    console.log("音声認識エラー:", event.error);
+
+    // 一時的なエラーなら再開を試みる
+  };
+
+
+  recognition.start();
+
+}
+
+
+document.getElementById("startButton").onclick = function() {
+
+  if (!listening) {
+
+    listening = true;
+
+    startListening();
+
+  }
+
+};
+
+
+document.getElementById("stopButton").onclick = function() {
+
+  listening = false;
+
+  if (recognition) {
+    recognition.stop();
+  }
+
+  document.getElementById("status").textContent =
+    "🔴 マイクはOFFです";
+
+};
+
+</script></body>
+</html>
