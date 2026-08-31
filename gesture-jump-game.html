@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ジェスチャー・ジャンプ</title>
+<style>
+  :root{
+    --bg-top:#1b2a4a;
+    --bg-bottom:#0c1526;
+    --panel:#12203a;
+    --accent:#ffb454;
+    --accent2:#5ee6c9;
+    --danger:#ff5d5d;
+    --text:#e9edf5;
+    --sub:#8fa0bf;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;
+    min-height:100%;
+    background:linear-gradient(180deg,var(--bg-top),var(--bg-bottom));
+    color:var(--text);
+    font-family:"Hiragino Sans","Yu Gothic UI",system-ui,sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:24px 16px 40px;
+  }
+  h1{
+    font-size:22px;
+    letter-spacing:.02em;
+    margin:4px 0 2px;
+  }
+  p.lead{
+    color:var(--sub);
+    font-size:13px;
+    margin:0 0 18px;
+    text-align:center;
+    max-width:520px;
+    line-height:1.6;
+  }
+  .stage{
+    position:relative;
+    width:100%;
+    max-width:640px;
+  }
+  #game{
+    width:100%;
+    display:block;
+    background:linear-gradient(180deg,#28406b 0%,#1a2c4d 55%,#16233d 100%);
+    border-radius:16px;
+    box-shadow:0 20px 50px -20px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.05);
+  }
+  .cam-wrap{
+    position:absolute;
+    top:12px;
+    right:12px;
+    width:120px;
+    height:90px;
+    border-radius:10px;
+    overflow:hidden;
+    box-shadow:0 6px 18px rgba(0,0,0,.5), 0 0 0 2px rgba(255,255,255,.08);
+    background:#000;
+  }
+  #preview{
+    width:100%;
+    height:100%;
+    display:block;
+    transform:scaleX(-1);
+  }
+  video{display:none;}
+  .hud{
+    position:absolute;
+    top:14px;
+    left:16px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+  .badge{
+    padding:6px 12px;
+    border-radius:999px;
+    font-size:13px;
+    font-weight:600;
+    background:rgba(255,255,255,.08);
+    backdrop-filter:blur(4px);
+  }
+  .badge.score{color:var(--accent);}
+  .badge.gesture{color:var(--accent2); transition:background .15s;}
+  .badge.gesture.active{background:rgba(94,230,201,.22);}
+  .controls{
+    width:100%;
+    max-width:640px;
+    display:flex;
+    justify-content:center;
+    gap:12px;
+    margin-top:16px;
+  }
+  button{
+    appearance:none;
+    border:none;
+    padding:12px 26px;
+    border-radius:10px;
+    font-size:15px;
+    font-weight:700;
+    cursor:pointer;
+    background:var(--accent);
+    color:#1a1206;
+    transition:transform .1s ease;
+  }
+  button:active{transform:scale(.96);}
+  button.secondary{
+    background:rgba(255,255,255,.1);
+    color:var(--text);
+  }
+  button:disabled{
+    opacity:.4;
+    cursor:default;
+  }
+  .legend{
+    display:flex;
+    gap:22px;
+    margin-top:18px;
+    color:var(--sub);
+    font-size:13px;
+  }
+  .legend span.key{
+    color:var(--text);
+    font-weight:700;
+  }
+  .overlay-msg{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    gap:10px;
+    text-align:center;
+    background:rgba(10,15,28,.72);
+    border-radius:16px;
+    font-size:16px;
+    padding:20px;
+  }
+  .overlay-msg.hidden{display:none;}
+  .overlay-msg .big{
+    font-size:26px;
+    font-weight:800;
+    color:var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<h1>ジェスチャー・ジャンプ</h1>
+<p class="lead">インカメラに手をかざしてね。<span style="color:var(--text);font-weight:700;">パー✋ = ジャンプ</span>、<span style="color:var(--text);font-weight:700;">グー✊ = 待機</span>。転がってくるボールをジャンプでよけよう。</p>
+
+<div class="stage">
+  <canvas id="game" width="640" height="360"></canvas>
+
+  <div class="hud">
+    <div class="badge score" id="scoreBadge">SCORE 0</div>
+    <div class="badge gesture" id="gestureBadge">認識待ち…</div>
+  </div>
+
+  <div class="cam-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="preview" width="120" height="90"></canvas>
+  </div>
+
+  <div class="overlay-msg" id="overlay">
+    <div class="big" id="overlayTitle">準備OK?</div>
+    <div id="overlayText" style="color:var(--sub);max-width:360px;">「カメラを開始」を押してカメラを許可してください。手が映る位置に持ってきたらスタートします。</div>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="startBtn">カメラを開始</button>
+  <button id="restartBtn" class="secondary" disabled>もう一度あそぶ</button>
+</div>
+
+<div class="legend">
+  <div><span class="key">✋ パー</span> → ジャンプ</div>
+  <div><span class="key">✊ グー</span> → 待機</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js" crossorigin="anonymous"></script>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- DOM ----------
+  const video = document.getElementById('video');
+  const previewCanvas = document.getElementById('preview');
+  const previewCtx = previewCanvas.getContext('2d');
+  const gameCanvas = document.getElementById('game');
+  const ctx = gameCanvas.getContext('2d');
+  const startBtn = document.getElementById('startBtn');
+  const restartBtn = document.getElementById('restartBtn');
+  const scoreBadge = document.getElementById('scoreBadge');
+  const gestureBadge = document.getElementById('gestureBadge');
+  const overlay = document.getElementById('overlay');
+  const overlayTitle = document.getElementById('overlayTitle');
+  const overlayText = document.getElementById('overlayText');
+
+  // ---------- Game constants ----------
+  const W = gameCanvas.width, H = gameCanvas.height;
+  const GROUND_Y = H - 60;
+  const GRAVITY = 0.85;
+  const JUMP_VELOCITY = -15.5;
+  const CHAR_X = 110;
+  const CHAR_W = 34, CHAR_H = 46;
+
+  // ---------- Game state ----------
+  let state = 'idle'; // idle | running | gameover
+  let charY = GROUND_Y - CHAR_H;
+  let velY = 0;
+  let jumping = false;
+  let balls = [];
+  let spawnTimer = 0;
+  let spawnInterval = 95;
+  let speed = 5.2;
+  let score = 0;
+  let frame = 0;
+
+  // ---------- Gesture state ----------
+  let currentGesture = 'none'; // 'open' | 'fist' | 'none'
+  let stableGesture = 'none';
+  let gestureStreak = 0;
+  const STREAK_NEEDED = 3;
+  let prevStableGesture = 'none';
+
+  function resetGame(){
+    charY = GROUND_Y - CHAR_H;
+    velY = 0;
+    jumping = false;
+    balls = [];
+    spawnTimer = 0;
+    spawnInterval = 95;
+    speed = 5.2;
+    score = 0;
+    frame = 0;
+    state = 'running';
+    overlay.classList.add('hidden');
+    restartBtn.disabled = true;
+  }
+
+  function gameOver(){
+    state = 'gameover';
+    overlayTitle.textContent = 'ゲームオーバー';
+    overlayText.textContent = 'スコア ' + score + '。パーでジャンプしてボールをよけよう。';
+    overlay.classList.remove('hidden');
+    restartBtn.disabled = false;
+  }
+
+  function doJump(){
+    if(!jumping && state === 'running'){
+      velY = JUMP_VELOCITY;
+      jumping = true;
+    }
+  }
+
+  // ---------- Drawing ----------
+  function drawBackground(){
+    ctx.clearRect(0,0,W,H);
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,'#28406b');
+    grad.addColorStop(0.55,'#1a2c4d');
+    grad.addColorStop(1,'#16233d');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,W,H);
+
+    // distant hills
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    for(let i=0;i<3;i++){
+      const cx = ((frame*0.3)+i*260) % (W+200) - 100;
+      ctx.beginPath();
+      ctx.ellipse(cx, GROUND_Y-10, 140, 40, 0, Math.PI, 0);
+      ctx.fill();
+    }
+
+    // ground
+    ctx.fillStyle = '#0f1a2e';
+    ctx.fillRect(0, GROUND_Y, W, H-GROUND_Y);
+    ctx.strokeStyle = 'rgba(255,180,84,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND_Y);
+    ctx.lineTo(W, GROUND_Y);
+    ctx.stroke();
+
+    // scrolling ground ticks
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    const tickSpacing = 40;
+    const offset = (frame*speed*0.6) % tickSpacing;
+    for(let x = -offset; x < W; x += tickSpacing){
+      ctx.beginPath();
+      ctx.moveTo(x, GROUND_Y+6);
+      ctx.lineTo(x-14, H);
+      ctx.stroke();
+    }
+  }
+
+  function drawCharacter(){
+    const x = CHAR_X, y = charY;
+    ctx.save();
+    ctx.translate(x, y);
+
+    // shadow
+    const squish = jumping ? Math.max(0.35, 1 - (GROUND_Y-CHAR_H-y)/140) : 1;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(CHAR_W/2, GROUND_Y-y+8, 16*squish, 5*squish, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // body
+    ctx.fillStyle = '#5ee6c9';
+    ctx.fillRect(4, 14, CHAR_W-8, CHAR_H-18);
+    // head
+    ctx.fillStyle = '#ffd9a0';
+    ctx.beginPath();
+    ctx.arc(CHAR_W/2, 12, 13, 0, Math.PI*2);
+    ctx.fill();
+    // headband
+    ctx.fillStyle = '#ffb454';
+    ctx.fillRect(CHAR_W/2-13, 4, 26, 6);
+    // eyes
+    ctx.fillStyle = '#12203a';
+    ctx.fillRect(CHAR_W/2+2, 10, 3, 3);
+    // legs
+    ctx.fillStyle = '#2e4a7a';
+    const legOffset = jumping ? 4 : (Math.floor(frame/8)%2===0 ? 2 : -2);
+    ctx.fillRect(6, CHAR_H-4, 8, 6+legOffset*0);
+    ctx.fillRect(CHAR_W-14, CHAR_H-4, 8, 6);
+
+    ctx.restore();
+  }
+
+  function spawnBall(){
+    const r = 14 + Math.random()*8;
+    balls.push({ x: W + r, y: GROUND_Y - r, r });
+  }
+
+  function drawBall(b){
+    const grad = ctx.createRadialGradient(b.x-4, b.y-4, 2, b.x, b.y, b.r);
+    grad.addColorStop(0, '#ff9d9d');
+    grad.addColorStop(1, '#ff5d5d');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  function circleRectCollide(cx, cy, r, rx, ry, rw, rh){
+    const closestX = Math.max(rx, Math.min(cx, rx+rw));
+    const closestY = Math.max(ry, Math.min(cy, ry+rh));
+    const dx = cx-closestX, dy = cy-closestY;
+    return (dx*dx+dy*dy) < r*r;
+  }
+
+  function update(){
+    frame++;
+
+    // physics
+    if(jumping){
+      velY += GRAVITY;
+      charY += velY;
+      if(charY >= GROUND_Y - CHAR_H){
+        charY = GROUND_Y - CHAR_H;
+        velY = 0;
+        jumping = false;
+      }
+    }
+
+    // difficulty ramp
+    if(frame % 300 === 0){
+      speed += 0.4;
+      spawnInterval = Math.max(48, spawnInterval - 6);
+    }
+
+    // spawn
+    spawnTimer++;
+    if(spawnTimer >= spawnInterval){
+      spawnTimer = 0;
+      spawnBall();
+    }
+
+    // move balls + collide
+    for(let i=balls.length-1;i>=0;i--){
+      const b = balls[i];
+      b.x -= speed;
+      if(b.x < -30) balls.splice(i,1);
+
+      if(circleRectCollide(b.x, b.y, b.r*0.85, CHAR_X+4, charY+10, CHAR_W-8, CHAR_H-14)){
+        gameOver();
+      }
+    }
+
+    score = Math.floor(frame/10);
+  }
+
+  function render(){
+    drawBackground();
+    balls.forEach(drawBall);
+    drawCharacter();
+    scoreBadge.textContent = 'SCORE ' + score;
+  }
+
+  function loop(){
+    if(state === 'running'){
+      update();
+    }
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Gesture recognition (MediaPipe Hands) ----------
+  function dist(a,b){
+    const dx=a.x-b.x, dy=a.y-b.y;
+    return Math.sqrt(dx*dx+dy*dy);
+  }
+
+  function classifyGesture(landmarks){
+    const wrist = landmarks[0];
+    const midMcp = landmarks[9];
+    const handSize = dist(wrist, midMcp) || 0.001;
+
+    const tips = [8,12,16,20].map(i=>landmarks[i]);
+    const avgTipDist = tips.reduce((s,t)=>s+dist(wrist,t),0)/tips.length;
+    const ratio = avgTipDist / handSize;
+
+    if(ratio > 1.7) return 'open';
+    if(ratio < 1.05) return 'fist';
+    return 'none';
+  }
+
+  function onResults(results){
+    previewCtx.save();
+    previewCtx.clearRect(0,0,previewCanvas.width, previewCanvas.height);
+    previewCtx.drawImage(results.image, 0, 0, previewCanvas.width, previewCanvas.height);
+
+    let detected = 'none';
+    if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+      const lm = results.multiHandLandmarks[0];
+      if(window.drawConnectors && window.HAND_CONNECTIONS){
+        window.drawConnectors(previewCtx, lm, window.HAND_CONNECTIONS, {color:'#5ee6c9', lineWidth:2});
+        window.drawLandmarks(previewCtx, lm, {color:'#ffb454', lineWidth:1, radius:2});
+      }
+      detected = classifyGesture(lm);
+    }
+    previewCtx.restore();
+
+    currentGesture = detected;
+
+    // debounce with a short streak so a single noisy frame can't flip state
+    if(detected === stableGesture){
+      gestureStreak = 0;
+    } else {
+      gestureStreak++;
+      if(gestureStreak >= STREAK_NEEDED){
+        stableGesture = detected;
+        gestureStreak = 0;
+      }
+    }
+
+    // rising edge: fist/none -> open triggers a jump
+    if(stableGesture === 'open' && prevStableGesture !== 'open'){
+      doJump();
+    }
+    prevStableGesture = stableGesture;
+
+    // HUD
+    if(stableGesture === 'open'){
+      gestureBadge.textContent = '✋ パー（ジャンプ）';
+      gestureBadge.classList.add('active');
+    } else if(stableGesture === 'fist'){
+      gestureBadge.textContent = '✊ グー（待機）';
+      gestureBadge.classList.remove('active');
+    } else {
+      gestureBadge.textContent = '認識中…';
+      gestureBadge.classList.remove('active');
+    }
+
+    // first successful hand detection starts the game
+    if(state === 'idle' && (stableGesture === 'open' || stableGesture === 'fist')){
+      resetGame();
+    }
+  }
+
+  let cameraStarted = false;
+  async function startCamera(){
+    if(cameraStarted) return;
+    cameraStarted = true;
+    startBtn.disabled = true;
+    overlayTitle.textContent = 'カメラ起動中…';
+    overlayText.textContent = 'ブラウザのカメラ許可ダイアログが出たら「許可」を押してください。';
+
+    const hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${f}`});
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 0,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.5
+    });
+    hands.onResults(onResults);
+
+    try{
+      const camera = new Camera(video, {
+        onFrame: async () => { await hands.send({image: video}); },
+        width: 320,
+        height: 240
+      });
+      await camera.start();
+      overlayTitle.textContent = '手をかざしてね';
+      overlayText.textContent = 'パー✋かグー✊を映すとゲームが始まります。';
+    } catch(err){
+      overlayTitle.textContent = 'カメラを開始できませんでした';
+      overlayText.textContent = 'カメラへのアクセスを許可してから、もう一度お試しください。';
+      startBtn.disabled = false;
+      cameraStarted = false;
+    }
+  }
+
+  startBtn.addEventListener('click', startCamera);
+  restartBtn.addEventListener('click', () => {
+    state = 'idle';
+    overlayTitle.textContent = '手をかざしてね';
+    overlayText.textContent = 'パー✋かグー✊を映すとゲームが始まります。';
+    overlay.classList.remove('hidden');
+  });
+
+  // keyboard fallback for testing without a camera
+  window.addEventListener('keydown', (e)=>{
+    if(e.code === 'Space'){
+      if(state === 'idle') resetGame();
+      else doJump();
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
