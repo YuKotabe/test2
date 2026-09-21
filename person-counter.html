@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>人数検出アプリ</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --accent: #38bdf8;
+    --accent-dark: #0ea5e9;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --danger: #f87171;
+    --success: #34d399;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Hiragino Sans", "Yu Gothic", -apple-system, sans-serif;
+    background: linear-gradient(160deg, #0f172a, #1e293b);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 24px 12px 60px;
+  }
+  .app {
+    width: 100%;
+    max-width: 640px;
+  }
+  h1 {
+    font-size: 1.4rem;
+    text-align: center;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 20px;
+  }
+  .status {
+    text-align: center;
+    padding: 10px;
+    border-radius: 10px;
+    background: var(--panel);
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  .status.ready { color: var(--success); }
+  .status.error { color: var(--danger); }
+
+  .mode-select {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .mode-btn {
+    flex: 1;
+    padding: 14px 8px;
+    border-radius: 12px;
+    border: 1px solid #334155;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .mode-btn:hover { border-color: var(--accent); }
+  .mode-btn.active {
+    background: var(--accent);
+    color: #0f172a;
+    font-weight: 700;
+    border-color: var(--accent);
+  }
+
+  .panel {
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .stage {
+    position: relative;
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    aspect-ratio: 4 / 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stage video, .stage img, .stage canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .stage .placeholder {
+    color: var(--muted);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 20px;
+  }
+
+  .count-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 1rem;
+    z-index: 5;
+  }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    flex: 1;
+    min-width: 120px;
+    padding: 12px;
+    border-radius: 10px;
+    border: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--accent);
+    color: #0f172a;
+  }
+  .btn:disabled {
+    background: #475569;
+    color: #94a3b8;
+    cursor: not-allowed;
+  }
+  .btn.secondary {
+    background: transparent;
+    border: 1px solid #475569;
+    color: var(--text);
+  }
+
+  input[type=file] { display: none; }
+
+  .result-box {
+    margin-top: 14px;
+    text-align: center;
+  }
+  .result-number {
+    font-size: 2.4rem;
+    font-weight: 800;
+    color: var(--accent);
+  }
+  .result-label {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.75rem;
+    margin-top: 20px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>👥 人数検出アプリ</h1>
+  <div class="subtitle">写真をアップロード、またはカメラで人数を検出します</div>
+
+  <div id="status" class="status">AIモデルを読み込み中です…</div>
+
+  <div class="mode-select">
+    <button class="mode-btn active" id="btnModeUpload">📷 画像をアップロード</button>
+    <button class="mode-btn" id="btnModeCamera">🎥 カメラをON</button>
+  </div>
+
+  <!-- アップロードパネル -->
+  <div class="panel" id="panelUpload">
+    <div class="stage" id="uploadStage">
+      <div class="placeholder">ここに画像はまだありません<br>下のボタンから画像を選択してください</div>
+      <img id="uploadImg" style="display:none;">
+      <canvas id="uploadCanvas" style="display:none;"></canvas>
+      <div class="count-badge" id="uploadBadge" style="display:none;"></div>
+    </div>
+    <div class="controls">
+      <button class="btn" id="btnPickFile">画像を選択</button>
+      <button class="btn secondary" id="btnDetectUpload" disabled>この画像で検出する</button>
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
+    <div class="result-box" id="uploadResultBox" style="display:none;">
+      <div class="result-number" id="uploadResultNumber">0</div>
+      <div class="result-label">人 検出されました</div>
+    </div>
+  </div>
+
+  <!-- カメラパネル -->
+  <div class="panel" id="panelCamera" style="display:none;">
+    <div class="stage" id="cameraStage">
+      <div class="placeholder" id="cameraPlaceholder">「カメラを起動」ボタンを押してください</div>
+      <video id="video" autoplay playsinline muted style="display:none;"></video>
+      <canvas id="overlayCanvas" style="display:none;"></canvas>
+      <div class="count-badge" id="cameraBadge" style="display:none;"></div>
+    </div>
+    <div class="controls">
+      <button class="btn" id="btnStartCamera">カメラを起動</button>
+      <button class="btn secondary" id="btnStopCamera" disabled>停止</button>
+    </div>
+  </div>
+
+  <footer>
+    すべての処理はブラウザ内で完結し、画像や映像は外部に送信されません。<br>
+    人物クラスのみをカウントしています（判定精度は完全ではありません）。
+  </footer>
+</div>
+
+<script>
+let model = null;
+let currentMode = 'upload';
+let cameraStream = null;
+let detectLoopId = null;
+
+const statusEl = document.getElementById('status');
+const btnModeUpload = document.getElementById('btnModeUpload');
+const btnModeCamera = document.getElementById('btnModeCamera');
+const panelUpload = document.getElementById('panelUpload');
+const panelCamera = document.getElementById('panelCamera');
+
+// --- モデル読み込み ---
+async function loadModel() {
+  try {
+    model = await cocoSsd.load();
+    statusEl.textContent = '準備完了。画像またはカメラで検出できます。';
+    statusEl.classList.add('ready');
+    document.getElementById('btnDetectUpload').disabled = false;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'AIモデルの読み込みに失敗しました。インターネット接続を確認してページを再読み込みしてください。';
+    statusEl.classList.add('error');
+  }
+}
+loadModel();
+
+// --- モード切替 ---
+btnModeUpload.addEventListener('click', () => switchMode('upload'));
+btnModeCamera.addEventListener('click', () => switchMode('camera'));
+
+function switchMode(mode) {
+  currentMode = mode;
+  btnModeUpload.classList.toggle('active', mode === 'upload');
+  btnModeCamera.classList.toggle('active', mode === 'camera');
+  panelUpload.style.display = mode === 'upload' ? 'block' : 'none';
+  panelCamera.style.display = mode === 'camera' ? 'block' : 'none';
+  if (mode === 'upload') {
+    stopCamera();
+  }
+}
+
+// --- 画像アップロード ---
+const fileInput = document.getElementById('fileInput');
+const btnPickFile = document.getElementById('btnPickFile');
+const btnDetectUpload = document.getElementById('btnDetectUpload');
+const uploadImg = document.getElementById('uploadImg');
+const uploadCanvas = document.getElementById('uploadCanvas');
+const uploadBadge = document.getElementById('uploadBadge');
+const uploadResultBox = document.getElementById('uploadResultBox');
+const uploadResultNumber = document.getElementById('uploadResultNumber');
+const uploadStage = document.getElementById('uploadStage');
+
+btnPickFile.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  uploadImg.src = url;
+  uploadImg.style.display = 'block';
+  uploadStage.querySelector('.placeholder').style.display = 'none';
+  uploadCanvas.style.display = 'none';
+  uploadBadge.style.display = 'none';
+  uploadResultBox.style.display = 'none';
+  btnDetectUpload.disabled = !model;
+});
+
+btnDetectUpload.addEventListener('click', async () => {
+  if (!model || !uploadImg.src) return;
+  btnDetectUpload.disabled = true;
+  btnDetectUpload.textContent = '検出中…';
+
+  await new Promise(r => uploadImg.complete ? r() : uploadImg.onload = r);
+
+  const predictions = await model.detect(uploadImg);
+  const people = predictions.filter(p => p.class === 'person');
+
+  // キャンバスに描画
+  const w = uploadImg.naturalWidth;
+  const h = uploadImg.naturalHeight;
+  uploadCanvas.width = w;
+  uploadCanvas.height = h;
+  const ctx = uploadCanvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(uploadImg, 0, 0, w, h);
+  drawBoxes(ctx, people, w, h);
+
+  uploadImg.style.display = 'none';
+  uploadCanvas.style.display = 'block';
+
+  uploadBadge.textContent = `${people.length} 人`;
+  uploadBadge.style.display = 'block';
+  uploadResultNumber.textContent = people.length;
+  uploadResultBox.style.display = 'block';
+
+  btnDetectUpload.disabled = false;
+  btnDetectUpload.textContent = 'もう一度検出する';
+});
+
+function drawBoxes(ctx, detections, canvasW, canvasH) {
+  ctx.lineWidth = Math.max(2, canvasW / 250);
+  ctx.strokeStyle = '#38bdf8';
+  ctx.font = `${Math.max(14, canvasW / 40)}px sans-serif`;
+  detections.forEach((d, i) => {
+    const [x, y, bw, bh] = d.bbox;
+    ctx.strokeRect(x, y, bw, bh);
+    const label = `人物 ${i + 1}`;
+    const textW = ctx.measureText(label).width + 8;
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(x, Math.max(0, y - 20), textW, 20);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillText(label, x + 4, Math.max(14, y - 5));
+  });
+}
+
+// --- カメラ ---
+const video = document.getElementById('video');
+const overlayCanvas = document.getElementById('overlayCanvas');
+const cameraBadge = document.getElementById('cameraBadge');
+const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+const btnStartCamera = document.getElementById('btnStartCamera');
+const btnStopCamera = document.getElementById('btnStopCamera');
+
+btnStartCamera.addEventListener('click', startCamera);
+btnStopCamera.addEventListener('click', stopCamera);
+
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('このブラウザではカメラを利用できません。');
+    return;
+  }
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+      audio: false
+    });
+    video.srcObject = cameraStream;
+    video.style.display = 'block';
+    overlayCanvas.style.display = 'block';
+    cameraPlaceholder.style.display = 'none';
+    cameraBadge.style.display = 'block';
+    btnStartCamera.disabled = true;
+    btnStopCamera.disabled = false;
+
+    video.onloadedmetadata = () => {
+      overlayCanvas.width = video.videoWidth;
+      overlayCanvas.height = video.videoHeight;
+      detectLoop();
+    };
+  } catch (err) {
+    console.error(err);
+    alert('カメラを起動できませんでした。ブラウザの権限設定をご確認ください。');
+  }
+}
+
+function stopCamera() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  if (detectLoopId) {
+    clearTimeout(detectLoopId);
+    detectLoopId = null;
+  }
+  video.style.display = 'none';
+  overlayCanvas.style.display = 'none';
+  cameraBadge.style.display = 'none';
+  cameraPlaceholder.style.display = 'block';
+  btnStartCamera.disabled = false;
+  btnStopCamera.disabled = true;
+}
+
+async function detectLoop() {
+  if (!cameraStream || !model) return;
+  try {
+    const predictions = await model.detect(video);
+    const people = predictions.filter(p => p.class === 'person');
+
+    const ctx = overlayCanvas.getContext('2d');
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    drawBoxes(ctx, people, overlayCanvas.width, overlayCanvas.height);
+
+    cameraBadge.textContent = `${people.length} 人`;
+  } catch (err) {
+    console.error(err);
+  }
+  detectLoopId = setTimeout(detectLoop, 400);
+}
+
+window.addEventListener('beforeunload', stopCamera);
+</script>
+</body>
+</html>
